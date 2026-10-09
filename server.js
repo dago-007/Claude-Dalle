@@ -29,6 +29,17 @@ const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
+// ---------- Bitácora de peticiones (diagnóstico; nunca registra el token) ----------
+app.use((req, res, next) => {
+  const t0 = Date.now();
+  res.on("finish", () => {
+    const path = req.path.startsWith("/img/") ? "/img/…" : req.path;
+    const auth = req.headers.authorization ? "auth:sí" : "auth:no";
+    console.log(`[REQ] ${req.method} ${path} -> ${res.statusCode} (${Date.now() - t0} ms, ${auth}, ua:${(req.headers["user-agent"] || "-").slice(0, 40)})`);
+  });
+  next();
+});
+
 // ---------- Salud (sin autenticación, para Render y para despertar el servicio) ----------
 app.get("/health", (_req, res) => res.json({ ok: true, model: IMAGE_MODEL }));
 
@@ -67,11 +78,26 @@ function allowRequest() {
   return true;
 }
 
-// ---------- Autenticación Bearer (comparación en tiempo constante) ----------
-const expected = Buffer.from(`Bearer ${CLAUDE_AUTH_TOKEN}`);
+// ---------- Autenticación Bearer (tolerante a espacios; comparación en tiempo constante) ----------
+const TOKEN = CLAUDE_AUTH_TOKEN.trim();
+
+function extractToken(header = "") {
+  const h = String(header).trim();
+  return /^bearer\s+/i.test(h) ? h.replace(/^bearer\s+/i, "").trim() : h;
+}
+
+function safeEqual(a, b) {
+  const A = Buffer.from(a);
+  const B = Buffer.from(b);
+  return A.length === B.length && crypto.timingSafeEqual(A, B);
+}
+
 function requireAuth(req, res, next) {
-  const got = Buffer.from(req.headers.authorization || "");
-  if (got.length !== expected.length || !crypto.timingSafeEqual(got, expected)) {
+  const got = extractToken(req.headers.authorization);
+  if (!got || !safeEqual(got, TOKEN)) {
+    console.warn(
+      `[AUTH] 401 ${req.method} ${req.path} — header ${req.headers.authorization ? "presente pero no coincide" : "ausente"}`
+    );
     return res.status(401).json({ error: "No autorizado" });
   }
   next();
