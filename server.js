@@ -1,20 +1,36 @@
 import express from "express";
+import cors from "cors";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import OpenAI from "openai";
 
 const app = express();
+app.use(cors()); // Habilita permisos para conexiones externas de Claude
 app.use(express.json());
 
 const CLAUDE_AUTH_TOKEN = process.env.CLAUDE_AUTH_TOKEN;
 
+// Validación de seguridad flexible
 app.use((req, res, next) => {
   const auth = req.headers.authorization;
-  if (CLAUDE_AUTH_TOKEN && auth !== `Bearer ${CLAUDE_AUTH_TOKEN}`) {
-    return res.status(401).json({ error: "No autorizado" });
+  console.log(`Petición recibida en ${req.path}. Header de autorización: "${auth}"`);
+
+  if (!CLAUDE_AUTH_TOKEN) {
+    return next();
   }
-  next();
+
+  // Comprobar si la contraseña coincide con o sin la palabra 'Bearer'
+  if (
+    auth === `Bearer ${CLAUDE_AUTH_TOKEN}` || 
+    auth === CLAUDE_AUTH_TOKEN ||
+    auth === `bearer ${CLAUDE_AUTH_TOKEN}`
+  ) {
+    return next();
+  }
+
+  console.log(`[AUTH DENEGADA] Recibido: "${auth}" | Esperado: "${CLAUDE_AUTH_TOKEN}"`);
+  return res.status(401).json({ error: "No autorizado" });
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
